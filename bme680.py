@@ -1,8 +1,8 @@
-import micropython
-
 from sensor_pack import bus_service, base_sensor
 from sensor_pack.base_sensor import Device, Iterator
 from sensor_pack import bitfield
+import array
+import struct
 
 
 class BME680bosh(Device, Iterator):
@@ -17,10 +17,32 @@ class BME680bosh(Device, Iterator):
         self.mode = False
         # self.enable_gas_conversion = True
         self._i2c_mode = True
+        self.calibration_data = array.array("l")  # signed long elements
 
     def _read_calibration_data(self):
         """Read calibration data and store in in ..."""
-        ...
+        # Типы значений:
+        # 0 - int8_t
+        # 1 - uint8_t
+        # 2 - int16_t
+        # 3 - uint16_t
+        tov = 2, 0, 3, 2, 0, 2, 2, 0, 0, 2, 2, 3, 3, 3, 0, 0, 0, 1, 0, 3, 2, 0, 0
+        unpack_prefix = "bBhH"
+        r0 = range(138, 162, 2)
+        for index, addr in enumerate(r0):   # 138...162
+            if 154 == addr:     # par_p6    0x99
+                ...
+                continue
+            fmt = unpack_prefix[tov[index]]
+            reg_val = self._read_register(addr, struct.calcsize(fmt))
+            val = self.unpack(fmt, reg_val)[0]
+            self.calibration_data[index] = val
+
+        for index, addr in enumerate(range(228, 234), len(r0)):    # 228..233
+            fmt = unpack_prefix[tov[index]]
+            reg_val = self._read_register(addr, struct.calcsize(fmt))
+            val = self.unpack(fmt, reg_val)[0]
+            self.calibration_data[index] = val
 
     @staticmethod
     def _get_raw_wt(val: int) -> tuple:
@@ -218,8 +240,6 @@ class BME680bosh(Device, Iterator):
         reg_val = self._read_register(0x2B, 1)[0]
         # gas_valid_r, heat_stab_r
         return bool(reg_val & 0x20), bool(reg_val & 0x10)
-
-
 
     def __iter__(self):
         return self
