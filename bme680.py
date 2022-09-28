@@ -18,9 +18,14 @@ class BME680bosh(Device, Iterator):
         # self.enable_gas_conversion = True
         self._i2c_mode = True
 
+    def _read_calibration_data(self):
+        """Read calibration data and store in in ..."""
+        ...
+
     @staticmethod
     def _get_raw_wt(val: int) -> tuple:
         """
+        Return raw wait time for write in register (multiplier, value_in_ms)
         :param val: 0..4094 [ms] wait time for gas sensor setpoint
         :return: tuple(multiplier, wait_time)
         """
