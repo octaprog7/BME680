@@ -158,7 +158,7 @@ class BME680bosh(Device, Iterator):
         t = BME680bosh._get_raw_wt(wait_time)
         self._write_register(0x64 + id, (t[0] << 6) | t[1], 1)
 
-    def heater_setpoint(self, id: int, current: int, resistance: int, wait_time: int):
+    def heater_set_point(self, id: int, current: int, resistance: int, wait_time: int):
         """
         Setup sensor gas heater with current, resistance, wait_time
         :param id: 0..9
@@ -171,7 +171,7 @@ class BME680bosh(Device, Iterator):
         self.heater_set_resistance(id, resistance)
         self.heater_set_wait_time(id, wait_time)
 
-    def heater_enable_setpoint(self, id: int, run_gas_conversion: bool):
+    def heater_enable_set_point(self, id: int, run_gas_conversion: bool):
         BME680bosh._check_gas_id(id)
         self._write_register(0x71, (int(run_gas_conversion) << 4) | id, 1)
 
@@ -184,29 +184,35 @@ class BME680bosh(Device, Iterator):
         msb, lsb, xlsb = self._read_register(start_addr, 3)
         return (msb << 12) | (lsb << 4) | (xlsb & 0xF0) >> 4
 
-    def get_pressure(self) -> int:
+    def _get_press(self) -> int:
         """return raw pressure"""
         return self._get_3x_data(0x1F)
 
-    def get_temperature(self) -> int:
+    def _get_temp(self) -> int:
         """return raw pressure"""
         return self._get_3x_data(0x22)
 
-    def get_humidity(self) -> int:
+    def _get_hum(self) -> int:
         """return raw humidity"""
         b = self._read_register(0x25, 2)
         return self.unpack("H", b)[0]
 
-    def get_gas_resistance_data(self) -> tuple:
+    def _get_gas_resistance_data(self) -> tuple:
         """Return (range_of_measured_gas_sensor_resistance, gas_sensor_resistance_data)"""
         msb, lsb = self._read_register(0x2A, 2)
         return lsb & 0x0F, (msb << 2) | ((lsb & 0xC0) >> 6)
 
     def get_gas_meas_status(self) -> tuple:
-        ... 0x1D
+        """Return tuple(new_data_flag, Gas_measuring_status_flag, Measuring_status_flag, Gas_measurement_index)"""
+        reg_val = self._read_register(0x1D, 1)[0]
+        # new_data_flag, Gas_measuring_status_flag, Measuring_status_flag, Gas_measurement_index
+        return bool(reg_val & 0x80), bool(reg_val & 0x40), bool(reg_val & 0x20), reg_val & 0x0F
 
     def get_gas_valid_status(self) -> tuple:
-        ...0x2B
+        """Return tuple(gas_valid_r, heat_stab_r)"""
+        reg_val = self._read_register(0x2B, 1)[0]
+        # gas_valid_r, heat_stab_r
+        return bool(reg_val & 0x20), bool(reg_val & 0x10)
 
 
 
