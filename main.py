@@ -20,7 +20,7 @@ if __name__ == '__main__':
     bme = bme680.BME680bosh(adaptor)
     chip_id = bme.get_id()
     print(f"chip_id: {hex(chip_id)}")
-    l = bme.read_calibration_data()
+    l = len(bme._calibration_data)
     print(f"calibration data array len: {l}")
     for i in range(l):
         print(f"data[{i}] = {bme.get_calibration_data(i)}")

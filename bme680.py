@@ -19,8 +19,15 @@ class BME680bosh(Device, Iterator):
         self._i2c_mode = True
         self._calibration_data = array.array("l")  # signed long elements
         #
-        self._read_calibration_data()
+        self.read_calibration_data()
 
+    @staticmethod
+    def _check_calibration_value(value: int, address: int):
+        if value == 0xFFFF:		# value == 0x00 or 
+            raise ValueError(f"Invalid register value {hex(value)} by addr: {hex(address)}!")
+
+    #   index   param_name
+    #   0       par_t2
     def get_calibration_data(self, index: int) -> int:
         """возвращает калибровочный коэффициент по его индексу.
         returns the calibration coefficient by its index"""
@@ -37,30 +44,31 @@ class BME680bosh(Device, Iterator):
         # 2 - int16_t
         # 3 - uint16_t
         address = 0x8A
-        # value type
-        tov = 2, 0, 3, 2, 0, 2, 2, 0, 0, 2, 2, 3, 3, 3, 0, 0, 0, 1, 0, 3, 2, 0, 0   # len = 23
-        offset = 0, 2, 2, 2, 2, 2, 2, 2, 1, 3, 2, 2, 66, 2, 1, 1, 1, 1, 1, 2, 2, 1
-        unpack_prefix = "bBhH"
+        tov = "hbHhbhhbbhhBbbbBbHhbb"              # len = 21, value format
+        offset = 0, 2, 2, 2, 2, 2, 2, 2, 1, 3, 2, 2, 68, 1, 1, 1, 1, 1, 2, 2, 1  # len = 21
         for typ, offs in zip(tov, offset):
             address += offs
-            fmt = unpack_prefix[typ]
-            size = struct.calcsize(fmt)
-
-            if 0xe2 == address:
-                b = self._read_register(0xE1, 3)    # read 0xE1, 0xE2, 0xE3
-                rv = (b[2] << 4) | (b[1] & 0x0F)    # par_h1
-                self._calibration_data.append(rv)
-                rv = (b[0] << 4) | ((b[1] & 0xF0) >> 4)  # par_h2
-                self._calibration_data.append(rv)
-                continue
+            size = struct.calcsize(typ)
 
             reg_val = self._read_register(address, size)
-            rv = self.unpack(fmt, reg_val)[0]
+            rv = self.unpack(typ, reg_val)[0]
             # check
-            if rv == 0x00 or rv == 0xFFFF:
-                raise ValueError(f"Invalid register addr: {address} value: {hex(rv)}")
+            BME680bosh._check_calibration_value(rv, address)
             self._calibration_data.append(rv)
-            # print(f"address: {address}; {fmt}; size: {size}")
+            # print(f"address: {hex(address)}; {typ}; size: {size}; value: {rv}")
+
+        # par_h1 read !
+        b = self._read_register(0xE1, 3)    # read 0xE1, 0xE2, 0xE3
+        rv = (b[2] << 4) | (b[1] & 0x0F)    # par_h1
+        BME680bosh._check_calibration_value(rv, 0xE2)
+        self._calibration_data.append(rv)
+        # print(f"address: 0xE3; H; size: 2; value: {rv}\tpar_h1")
+        # par_h2 read !
+        rv = (b[0] << 4) | ((b[1] & 0xF0) >> 4)  # par_h2
+        BME680bosh._check_calibration_value(rv, 0xE3)
+        self._calibration_data.append(rv)
+        # print(f"address: 0xE1; H; size: 2; value: {rv}\tpar_h2")
+
         return len(self._calibration_data)
 
     @staticmethod
