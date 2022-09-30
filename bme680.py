@@ -28,6 +28,28 @@ class BME680bosh(Device, Iterator):
 
     #   index   param_name
     #   0       par_t2
+    #   1       par_t3
+    #   2       par_p1
+    #   3       par_p2
+    #   4       par_p3
+    #   5       par_p4
+    #   6       par_p5
+    #   7       par_p7
+    #   8       par_p6
+    #   9       par_p8
+    #   10      par_p9
+    #   11      par_p10
+    #   12      par_h3
+    #   13      par_h4
+    #   14      par_h5
+    #   15      par_h6
+    #   16      par_h7
+    #   17      par_t1
+    #   18      par_g2
+    #   19      par_g1
+    #   20      par_g3
+    #   21      par_h1
+    #   22      par_h2
     def get_calibration_data(self, index: int) -> int:
         """возвращает калибровочный коэффициент по его индексу.
         returns the calibration coefficient by its index"""
