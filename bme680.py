@@ -1,8 +1,8 @@
 from sensor_pack import bus_service, base_sensor
 from sensor_pack.base_sensor import Device, Iterator
 from sensor_pack import bitfield
-import array
 import struct
+import array
 
 
 class BME680bosh(Device, Iterator):
@@ -17,32 +17,51 @@ class BME680bosh(Device, Iterator):
         self.mode = False
         # self.enable_gas_conversion = True
         self._i2c_mode = True
-        self.calibration_data = array.array("l")  # signed long elements
+        self._calibration_data = array.array("l")  # signed long elements
+        #
+        self._read_calibration_data()
 
-    def _read_calibration_data(self):
-        """Read calibration data and store in in ..."""
+    def get_calibration_data(self, index: int) -> int:
+        """возвращает калибровочный коэффициент по его индексу.
+        returns the calibration coefficient by its index"""
+        base_sensor.check_value(index, range(0, 23), f"Invalid index value: {index}")
+        return self._calibration_data[index]
+
+    def read_calibration_data(self) -> int:
+        if self._calibration_data:
+            raise ValueError(f"calibration data array already filled!")
+        """Read calibration data and store in array"""
         # Типы значений:
         # 0 - int8_t
         # 1 - uint8_t
         # 2 - int16_t
         # 3 - uint16_t
-        tov = 2, 0, 3, 2, 0, 2, 2, 0, 0, 2, 2, 3, 3, 3, 0, 0, 0, 1, 0, 3, 2, 0, 0
+        address = 0x8A
+        # value type
+        tov = 2, 0, 3, 2, 0, 2, 2, 0, 0, 2, 2, 3, 3, 3, 0, 0, 0, 1, 0, 3, 2, 0, 0   # len = 23
+        offset = 0, 2, 2, 2, 2, 2, 2, 2, 1, 3, 2, 2, 66, 2, 1, 1, 1, 1, 1, 2, 2, 1
         unpack_prefix = "bBhH"
-        r0 = range(138, 162, 2)
-        for index, addr in enumerate(r0):   # 138...162
-            if 154 == addr:     # par_p6    0x99
-                ...
-                continue
-            fmt = unpack_prefix[tov[index]]
-            reg_val = self._read_register(addr, struct.calcsize(fmt))
-            val = self.unpack(fmt, reg_val)[0]
-            self.calibration_data[index] = val
+        for typ, offs in zip(tov, offset):
+            address += offs
+            fmt = unpack_prefix[typ]
+            size = struct.calcsize(fmt)
 
-        for index, addr in enumerate(range(228, 234), len(r0)):    # 228..233
-            fmt = unpack_prefix[tov[index]]
-            reg_val = self._read_register(addr, struct.calcsize(fmt))
-            val = self.unpack(fmt, reg_val)[0]
-            self.calibration_data[index] = val
+            if 0xe2 == address:
+                b = self._read_register(0xE1, 3)    # read 0xE1, 0xE2, 0xE3
+                rv = (b[2] << 4) | (b[1] & 0x0F)    # par_h1
+                self._calibration_data.append(rv)
+                rv = (b[0] << 4) | ((b[1] & 0xF0) >> 4)  # par_h2
+                self._calibration_data.append(rv)
+                continue
+
+            reg_val = self._read_register(address, size)
+            rv = self.unpack(fmt, reg_val)[0]
+            # check
+            if rv == 0x00 or rv == 0xFFFF:
+                raise ValueError(f"Invalid register addr: {address} value: {hex(rv)}")
+            self._calibration_data.append(rv)
+            # print(f"address: {address}; {fmt}; size: {size}")
+        return len(self._calibration_data)
 
     @staticmethod
     def _get_raw_wt(val: int) -> tuple:
