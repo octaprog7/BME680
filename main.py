@@ -24,3 +24,20 @@ if __name__ == '__main__':
     print(f"calibration data array len: {l}")
     for i in range(l):
         print(f"data[{i}] = {bme.get_calibration_data(i)}")
+
+    # set oversampling for relative humidity, temperature, air pressure
+    bme.set_oversampling(0, 1)  # relative humidity
+    bme.set_oversampling(2, 2)  # temperature
+    bme.set_oversampling(1, 5)  # air pressure
+    #
+    bme.set_iir_filter(3)
+    # set mode
+    # bme.set_mode(True)
+
+    for i in range(10):
+        bme.set_mode(True)
+        time.sleep_ms(1000)
+        t = bme.get_temperature()
+        h = bme.get_humidity()
+        p = bme.get_pressure()
+        print(f"T={t}; H={h}; P={p}")
