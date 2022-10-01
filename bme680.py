@@ -5,6 +5,25 @@ import struct
 import array
 
 
+# gas_range_r	const_array1_int	const_array2_int
+# ------------------------------------------------
+# 0  	    2 ** 31	- 1		    4096000000
+# 1		    2 ** 31	- 1		    2048000000
+# 2		    2 ** 31	- 1		    1024000000
+# 3		    2 ** 31	- 1		    512000000
+# 4		    2 ** 31	- 1		    255744255 *
+# 5		!   2126008810		    127110228 *
+# 6		    2 ** 31	- 1		    64000000
+# 7		    2130303777		    32258064 *
+# 8		    2 ** 31	- 1		    16016016 *
+# 9		    2 ** 31	- 1		    8000000
+# 10	    2143188679		    4000000
+# 11	    2136746228		    2000000
+# 12	    2 ** 31	- 1		    1000000
+# 13	!   2126008810		    500000
+# 14	    2 ** 31	- 1		    250000
+# 15	    2 ** 31	- 1		    125000
+
 class BME680bosh(Device, Iterator):
     """Class for work with Bosh BME680 sensor"""
     def __init__(self, adapter: bus_service.BusAdapter, address=0x77):
@@ -20,6 +39,22 @@ class BME680bosh(Device, Iterator):
         self._calibration_data = array.array("l")  # signed long elements
         #
         self.read_calibration_data()
+
+    @staticmethod
+    def get_array_item(id: int, index: int) -> int:
+        """Return item from array of const (pls see documentation).
+        id = 0, from const_array1_int,
+        id = 1, from const_array2_int.
+        index must by in range 0..15 (range(16))"""
+        base_sensor.check_value(id, range(2), f"Invalid id value: {id}")
+        base_sensor.check_value(index, range(16), f"Invalid index value: {index}")
+        ct = 2 ** 31 - 1, 4096000000
+        t = (5, 7, 10, 11, 13), (4, 5, 7, 8)
+        arr = (2126008810, 2130303777, 2143188679, 2136746228, 2126008810), (255744255, 127110228, 32258064, 16016016)
+
+        if index in t[id]:
+            return arr[id][t[id].index(index)]
+        return ct[id] if 0 == id else ct[id] // (2 ** index)
 
     @staticmethod
     def _check_calibration_value(value: int, address: int):
