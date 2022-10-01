@@ -4,7 +4,7 @@ from sensor_pack import bitfield
 import struct
 import array
 
-
+# for get_array_item:
 # gas_range_r	const_array1_int	const_array2_int
 # ------------------------------------------------
 # 0  	    2 ** 31	- 1		    4096000000
@@ -24,6 +24,7 @@ import array
 # 14	    2 ** 31	- 1		    250000
 # 15	    2 ** 31	- 1		    125000
 
+
 class BME680bosh(Device, Iterator):
     """Class for work with Bosh BME680 sensor"""
     def __init__(self, adapter: bus_service.BusAdapter, address=0x77):
@@ -39,6 +40,9 @@ class BME680bosh(Device, Iterator):
         self._calibration_data = array.array("l")  # signed long elements
         #
         self.read_calibration_data()
+        # for internal calculation
+        self.t_fine = 0
+        self.temp_comp = 0
 
     @staticmethod
     def get_array_item(id: int, index: int) -> int:
@@ -324,6 +328,73 @@ class BME680bosh(Device, Iterator):
         reg_val = self._read_register(0x2B, 1)[0]
         # gas_valid_r, heat_stab_r
         return bool(reg_val & 0x20), bool(reg_val & 0x10)
+
+    def get_temperature(self) -> float:
+        """Возвращает температуру окружающей среды в градусах Цельсия.
+        Returns the ambient temperature in degrees Celsius."""
+        raw = self._get_temp()
+        # 17, 0 , 1: par_t1, par_t2, par_t3
+        getcd = self.get_calibration_data
+        par_t1, par_t2, par_t3 = getcd(17), getcd(0), getcd(1)
+        var1 = par_t2 * (raw / 16384.0 - par_t1 / 1024.0)
+        x = raw / 131072.0 - par_t1 / 8192.0
+        var2 = 16.0 * par_t3 * x * x
+        tmp = var1 + var2
+        self.t_fine = tmp
+        self.temp_comp = 0.0001953125 * tmp
+        return self.temp_comp
+
+    def get_pressure(self) -> float:
+        """Возвращает давление воздуха окружающей среды в гектопаскалях.
+        Returns the ambient air pressure in hPa."""
+        raw = self._get_press()
+        getcd = self.get_calibration_data
+        par_p1, par_p2, par_p3, par_p4 = getcd(2), getcd(3), getcd(4), getcd(5)
+        par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd(6), getcd(8), getcd(7), getcd(9), getcd(10), getcd(11)
+        #
+        var1 = self.t_fine / 2.0 - 64000.0
+        var2 = var1 * var1 * par_p6 / 131072.0
+        var2 += 2 * var1 * par_p5
+        var2 = 0.25 * var2 + par_p4 * 65536.0
+        var1 = par_p3 * var1 * var1 / 16384.0 + par_p2 * var1 / 524288.0
+        var1 = (1.0 + (var1 / 32768.0)) * par_p1
+        press_comp = 1048576.0 - raw
+        press_comp = ((press_comp - var2 / 4096.0) * 6250.0) / var1
+        var1 = (par_p9 * press_comp * press_comp) / 2147483648.0
+        var2 = press_comp * par_p8 / 32768
+        x = press_comp / 256
+        var3 = x * x * x * par_p10 / 131072.0
+        press_comp += (var1 + var2 + var3 + (par_p7 * 128.0)) / 16.0
+        return press_comp
+
+    def get_humidity(self) -> float:
+        """Возвращает влажность окружающего воздуха в процентах.
+        Returns the ambient humidity in percent."""
+        raw = self._get_hum()
+        getcd = self.get_calibration_data
+        par_h1, par_h2, par_h3, par_h4 = getcd(21), getcd(22), getcd(12), getcd(13)
+        par_h5, par_h6, par_h7 = getcd(14), getcd(15), getcd(16)
+        #
+        tc = self.temp_comp
+        var1 = raw - 16.0 * par_h1 + 0.5 * par_h3 * tc
+        var2 = var1 * (par_h2 / 262144.0 * (1.0 + (par_h4 / 16384.0 * tc) + (par_h5 / 1048576.0 * tc * tc)))
+        var3, var4 = par_h6 / 16384.0, par_h7 / 2097152.0
+        return var2 + (var3 + var4 * tc) * var2 * var2
+
+    def get_gas(self, heater_temp: float = 300) -> float:
+        """Return """
+        gas_range, raw = self._get_gas_resistance_data()
+        # target temperature
+        tt = heater_temp
+        getcd = self.get_calibration_data
+        par_g1, par_g2, par_g3 = getcd(19), getcd(18), getcd(20)
+        var1 = 49 + par_g1 / 16.0
+        var2 = 0.00235 + par_g2 / 32768.0 * 0.0005
+        var3 = par_g3 / 1024.0
+        var4 = var1 * (1.0 + var2 * tt)
+        var5 = var4 + var3 * self.temp_comp
+        #
+        res_heat_x = (3.4 * ((var5 * (4.0 / (4.0 + gas_range)) * (1.0 / (1.0 + (res_heat_val * 0.002)))) - 25))
 
     def __iter__(self):
         return self
