@@ -182,10 +182,16 @@ class BME680bosh(Device, Iterator):
         osrs_id = 1     давление
         osrs_id = 2     температура
 
+        Установи osrs_value в 0 для пропуска измерения параметра!
+        Всегда измеряйте температуру воздуха! Не пропускайте измерение температуры воздуха!
+
         Sets the oversampling value for:
          osrs_id = 0 relative humidity
          osrs_id = 1 pressure
          osrs_id = 2 temperature
+
+        Set osrs_value to 0 to skip parameter measurement!
+        Always measure the air temperature! Don't skip the air temperature measurement!
         """
         base_sensor.check_value(osrs_id, range(3), f"Invalid osrs_id value: {osrs_id}")
         base_sensor.check_value(osrs_value, range(6), f"id: {osrs_id}. Invalid osrs_value: {osrs_value}")
@@ -296,15 +302,33 @@ class BME680bosh(Device, Iterator):
 
     # Data registers
     def _get_3x_data(self, start_addr: int) -> int:
+        # osrs_id = 1   atmosphere air pressure
+        # osrs_id = 2   temperature
+
+        # 16 + (osrs_t(p) – 1) bit resolution. xlsb
+        osrs_id = -1
+        if 0x1F == start_addr:  # pressure
+            osrs_id = 1
+        else:
+            osrs_id = 2
+
+        if 0x00 == self.osrs[osrs_id]:
+            return 0x8000   # measuring skipped!!!
+        curr_resol = self.osrs[osrs_id] - 1  # + 16 !
+        if 0 != self.IIR_filter:  # 20 bit resolution
+            curr_resol = 4
         msb, lsb, xlsb = self._read_register(start_addr, 3)
-        return (msb << 12) | (lsb << 4) | (xlsb & 0xF0) >> 4
+        return msb << (8 + curr_resol) | (lsb << curr_resol) | (xlsb & 0xF0) >> 4
 
     def _get_press(self) -> int:
         """return raw pressure"""
         return self._get_3x_data(0x1F)
 
     def _get_temp(self) -> int:
-        """return raw pressure"""
+        """return raw pressure
+        • When the IIR filter is enabled, the temperature resolution is 20 bit
+        • When the IIR filter is disabled, the temperature resolution is 16 + (osrs_t – 1) bit,
+            e.g. 18 bit when osrs_t is set to ‘3’"""
         return self._get_3x_data(0x22)
 
     def _get_hum(self) -> int:
@@ -394,7 +418,8 @@ class BME680bosh(Device, Iterator):
         var4 = var1 * (1.0 + var2 * tt)
         var5 = var4 + var3 * self.temp_comp
         #
-        res_heat_x = (3.4 * ((var5 * (4.0 / (4.0 + gas_range)) * (1.0 / (1.0 + (res_heat_val * 0.002)))) - 25))
+        # res_heat_x = (3.4 * ((var5 * (4.0 / (4.0 + gas_range)) * (1.0 / (1.0 + (res_heat_val * 0.002)))) - 25))
+        return 0
 
     def __iter__(self):
         return self
