@@ -89,11 +89,21 @@ class BME680bosh(Device, Iterator):
     #   20      par_g3
     #   21      par_h1
     #   22      par_h2
-    def get_calibration_data(self, index: int) -> int:
+    def get_calibration_data(self, value: [int, tuple, list]) -> int:
         """возвращает калибровочный коэффициент по его индексу.
-        returns the calibration coefficient by its index"""
-        base_sensor.check_value(index, range(0, 23), f"Invalid index value: {index}")
-        return self._calibration_data[index]
+        Если вместо int передать tuple или list, содержащие набор правильных индексов,
+        функция вернет калибровочные коэффициенты для всех указанных индексов!
+        returns the calibration coefficient by its index.
+        If instead of int you pass a tuple or list containing the correct indices,
+        the function will return the calibration coefficients for all specified indices!"""
+        # print("isinstance(...):", value)
+        if isinstance(value, int):
+            base_sensor.check_value(value, range(0, 23), f"Invalid index value: {value}")
+            return self._calibration_data[value]
+        if isinstance(value, (tuple, list)):
+            for idx in value:
+                base_sensor.check_value(idx, range(0, 23), f"Invalid index value: {idx}")
+                yield self._calibration_data[idx]
 
     def read_calibration_data(self) -> int:
         if self._calibration_data:
@@ -362,53 +372,52 @@ class BME680bosh(Device, Iterator):
         raw = self._get_temp()
         # 17, 0 , 1: par_t1, par_t2, par_t3
         getcd = self.get_calibration_data
-        par_t1, par_t2, par_t3 = getcd(17), getcd(0), getcd(1)
-        var1 = par_t2 * (raw / 2**14 - par_t1 / 2**10)
-        x = raw / 131072 - par_t1 / 8192
-        var2 = 16 * par_t3 * x * x
+        tt = tuple(getcd((17, 0, 1)))
+        var1 = tt[1] * (raw / 2**14 - tt[0] / 2**10)
+        x = raw / 131072 - tt[0] / 8192
+        var2 = 16 * tt[2] * x * x
         tmp = var1 + var2
         self.t_fine = tmp
         self.temp_comp = 0.0001953125 * tmp
-        print(f"self.t_fine: {self.t_fine}")
-        return self.temp_comp
+        # print(f"self.t_fine: {self.t_fine}")
+        return self.temp_comp    
+    
 
     def get_pressure(self) -> float:
-        """Возвращает давление воздуха окружающей среды в гектопаскалях.
-        Returns the barometric pressure in hectoPascals."""
+        """Возвращает давление воздуха окружающей среды в паскалях.
+        Returns the barometric pressure in Pascals."""
         raw = self._get_press()
-        print(f"raw pressure: {raw}")
+        # print(f"raw pressure: {raw}")
         getcd = self.get_calibration_data
-        par_p1, par_p2, par_p3, par_p4 = getcd(2), getcd(3), getcd(4), getcd(5)
-        par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd(6), getcd(8), getcd(7), getcd(9), getcd(10), getcd(11)
-        #
-        # print("QQQ")
-        # print(par_p1, par_p2, par_p3, par_p4, par_p5, par_p6, par_p7, par_p8, par_p9, par_p10)
-        
-        var1 = self.t_fine / 2 - 64000
-        print(f"pressure var1: {var1}")
-        var2 = var1 * var1 * par_p6 / 2**17
-        var2 += 2 * var1 * par_p5
-        var2 = 0.25 * var2 + par_p4 * 2**16
-        var1 = par_p3 * var1 * var1 / 2**14 + par_p2 * var1 / 2**19
-        var1 = par_p1 * (1 + var1 / 2**15)
-        press_comp = 2**20 - raw
-        press_comp = ((press_comp - (var2 / 4096.0)) * 6250.0) / var1
-        var1 = (par_p9 * press_comp * press_comp) / 2**31
-        var2 = press_comp * par_p8 / 2**15
-        x = press_comp / 2**8
-        var3 = x * x * x * par_p10 / 2**17
-        #print(f"var1: {var1}; var2: {var2}; var3: {var3}")
-        press_comp = press_comp + 0.0625 * (var1 + var2 + var3 + (par_p7 * 2**7))
-        return press_comp
+        par_p1, par_p2, par_p3, par_p4 = getcd((2, 3, 4, 5))
+        par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd((6, 8, 7, 9, 10, 11))
 
+        var1 = (0.5 * self.t_fine) - 64000
+        var2 = var1 * var1 * par_p6 / 131072
+        var2 = var2 + 2 * var1 * par_p5
+        var2 = 0.25 * var2 + par_p4 * 65536
+        var1 = (((par_p3 * var1 * var1) / 16384) + (par_p2 * var1)) / 524288
+        var1 = (1 + (var1 / 32768)) * par_p1
+        press_comp = 1048576 - raw
+        press_comp = ((press_comp - (var2 / 4096)) * 6250) / var1
+        var1 = (par_p9 * press_comp * press_comp) / 2147483648
+        var2 = press_comp * (par_p8 / 32768)
+        x = 0.00390625 * press_comp
+        var3 = x * x * x * (par_p10 / 131072)
+        press_comp = press_comp + 0.0625 * (var1 + var2 + var3 + (par_p7 * 128))
+        
+        return press_comp
+        
+        
     def get_humidity(self) -> float:
         """Возвращает влажность окружающего воздуха в процентах.
         Returns the ambient humidity in percent."""
         raw = self._get_hum()
         # print(f"raw humidity: {raw}")
         getcd = self.get_calibration_data
-        par_h1, par_h2, par_h3, par_h4 = getcd(21), getcd(22), getcd(12), getcd(13)
-        par_h5, par_h6, par_h7 = getcd(14), getcd(15), getcd(16)
+        par_h1, par_h2, par_h3, par_h4 = getcd((21, 22, 12, 13))
+        par_h5, par_h6, par_h7 = getcd((14, 15, 16))
+        #print(type(par_h1))
         #
         tc = self.temp_comp
         var1 = raw - 16 * par_h1 + 0.5 * par_h3 * tc
@@ -422,7 +431,7 @@ class BME680bosh(Device, Iterator):
         # target temperature
         tt = heater_temp
         getcd = self.get_calibration_data
-        par_g1, par_g2, par_g3 = getcd(19), getcd(18), getcd(20)
+        par_g1, par_g2, par_g3 = getcd((19, 18, 20))
         var1 = 49 + par_g1 / 16.0
         var2 = 0.00235 + par_g2 / 32768.0 * 0.0005
         var3 = par_g3 / 1024.0
