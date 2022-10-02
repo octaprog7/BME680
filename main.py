@@ -21,23 +21,23 @@ if __name__ == '__main__':
     chip_id = bme.get_id()
     print(f"chip_id: {hex(chip_id)}")
     l = len(bme._calibration_data)
-    print(f"calibration data array len: {l}")
-    for i in range(l):
-        print(f"data[{i}] = {bme.get_calibration_data(i)}")
+    #print(f"calibration data array len: {l}")
+    #for i in range(l):
+    #    print(f"data[{i}] = {bme.get_calibration_data(i)}")
 
     # set oversampling for relative humidity, temperature, air pressure
     bme.set_oversampling(0, 1)  # relative humidity
     bme.set_oversampling(2, 2)  # temperature
-    bme.set_oversampling(1, 5)  # air pressure
+    bme.set_oversampling(1, 1)  # air pressure
     #
     bme.set_iir_filter(3)
     # set mode
     # bme.set_mode(True)
 
-    for i in range(100):
+    while True:
         bme.set_mode(True)
         time.sleep_ms(1500)
         t = bme.get_temperature()
         h = bme.get_humidity()
         p = bme.get_pressure()
-        print(f"T={t}; H={h}; P={p}")
+        print(f"T={t} Celsius; H={h} %; P={p} Pa")
