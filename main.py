@@ -34,9 +34,9 @@ if __name__ == '__main__':
     # set mode
     # bme.set_mode(True)
 
-    for i in range(10):
+    for i in range(100):
         bme.set_mode(True)
-        time.sleep_ms(1000)
+        time.sleep_ms(1500)
         t = bme.get_temperature()
         h = bme.get_humidity()
         p = bme.get_pressure()
