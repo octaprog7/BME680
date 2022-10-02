@@ -318,6 +318,8 @@ class BME680bosh(Device, Iterator):
         if 0 != self.IIR_filter:  # 20 bit resolution
             curr_resol = 4
         msb, lsb, xlsb = self._read_register(start_addr, 3)
+        # if 0x1F == start_addr:  # pressure
+        #    print(msb, lsb, (xlsb & 0xF0) >> 4)
         return msb << (8 + curr_resol) | (lsb << curr_resol) | (xlsb & 0xF0) >> 4
 
     def _get_press(self) -> int:
@@ -334,7 +336,8 @@ class BME680bosh(Device, Iterator):
     def _get_hum(self) -> int:
         """return raw humidity"""
         b = self._read_register(0x25, 2)
-        return self.unpack("H", b)[0]
+        return struct.unpack('>H', b)[0]
+        #return self.unpack("H", b)[0]
 
     def _get_gas_resistance_data(self) -> tuple:
         """Return (range_of_measured_gas_sensor_resistance, gas_sensor_resistance_data)"""
@@ -360,49 +363,57 @@ class BME680bosh(Device, Iterator):
         # 17, 0 , 1: par_t1, par_t2, par_t3
         getcd = self.get_calibration_data
         par_t1, par_t2, par_t3 = getcd(17), getcd(0), getcd(1)
-        var1 = par_t2 * (raw / 16384.0 - par_t1 / 1024.0)
-        x = raw / 131072.0 - par_t1 / 8192.0
-        var2 = 16.0 * par_t3 * x * x
+        var1 = par_t2 * (raw / 2**14 - par_t1 / 2**10)
+        x = raw / 131072 - par_t1 / 8192
+        var2 = 16 * par_t3 * x * x
         tmp = var1 + var2
         self.t_fine = tmp
         self.temp_comp = 0.0001953125 * tmp
+        print(f"self.t_fine: {self.t_fine}")
         return self.temp_comp
 
     def get_pressure(self) -> float:
         """Возвращает давление воздуха окружающей среды в гектопаскалях.
-        Returns the ambient air pressure in hPa."""
+        Returns the barometric pressure in hectoPascals."""
         raw = self._get_press()
+        print(f"raw pressure: {raw}")
         getcd = self.get_calibration_data
         par_p1, par_p2, par_p3, par_p4 = getcd(2), getcd(3), getcd(4), getcd(5)
         par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd(6), getcd(8), getcd(7), getcd(9), getcd(10), getcd(11)
         #
-        var1 = self.t_fine / 2.0 - 64000.0
-        var2 = var1 * var1 * par_p6 / 131072.0
+        # print("QQQ")
+        # print(par_p1, par_p2, par_p3, par_p4, par_p5, par_p6, par_p7, par_p8, par_p9, par_p10)
+        
+        var1 = self.t_fine / 2 - 64000
+        print(f"pressure var1: {var1}")
+        var2 = var1 * var1 * par_p6 / 2**17
         var2 += 2 * var1 * par_p5
-        var2 = 0.25 * var2 + par_p4 * 65536.0
-        var1 = par_p3 * var1 * var1 / 16384.0 + par_p2 * var1 / 524288.0
-        var1 = (1.0 + (var1 / 32768.0)) * par_p1
-        press_comp = 1048576.0 - raw
-        press_comp = ((press_comp - var2 / 4096.0) * 6250.0) / var1
-        var1 = (par_p9 * press_comp * press_comp) / 2147483648.0
-        var2 = press_comp * par_p8 / 32768
-        x = press_comp / 256
-        var3 = x * x * x * par_p10 / 131072.0
-        press_comp += (var1 + var2 + var3 + (par_p7 * 128.0)) / 16.0
+        var2 = 0.25 * var2 + par_p4 * 2**16
+        var1 = par_p3 * var1 * var1 / 2**14 + par_p2 * var1 / 2**19
+        var1 = par_p1 * (1 + var1 / 2**15)
+        press_comp = 2**20 - raw
+        press_comp = ((press_comp - (var2 / 4096.0)) * 6250.0) / var1
+        var1 = (par_p9 * press_comp * press_comp) / 2**31
+        var2 = press_comp * par_p8 / 2**15
+        x = press_comp / 2**8
+        var3 = x * x * x * par_p10 / 2**17
+        #print(f"var1: {var1}; var2: {var2}; var3: {var3}")
+        press_comp = press_comp + 0.0625 * (var1 + var2 + var3 + (par_p7 * 2**7))
         return press_comp
 
     def get_humidity(self) -> float:
         """Возвращает влажность окружающего воздуха в процентах.
         Returns the ambient humidity in percent."""
         raw = self._get_hum()
+        # print(f"raw humidity: {raw}")
         getcd = self.get_calibration_data
         par_h1, par_h2, par_h3, par_h4 = getcd(21), getcd(22), getcd(12), getcd(13)
         par_h5, par_h6, par_h7 = getcd(14), getcd(15), getcd(16)
         #
         tc = self.temp_comp
-        var1 = raw - 16.0 * par_h1 + 0.5 * par_h3 * tc
-        var2 = var1 * (par_h2 / 262144.0 * (1.0 + (par_h4 / 16384.0 * tc) + (par_h5 / 1048576.0 * tc * tc)))
-        var3, var4 = par_h6 / 16384.0, par_h7 / 2097152.0
+        var1 = raw - 16 * par_h1 + 0.5 * par_h3 * tc
+        var2 = var1 * (par_h2 / 262144 * (1 + (par_h4 / 16384 * tc) + (par_h5 / 1048576 * tc * tc)))
+        var3, var4 = par_h6 / 16384, par_h7 / 2097152
         return var2 + (var3 + var4 * tc) * var2 * var2
 
     def get_gas(self, heater_temp: float = 300) -> float:
