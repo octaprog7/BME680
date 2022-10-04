@@ -43,10 +43,19 @@ class BME680bosh(Device, Iterator):
         # for internal calculation
         self.t_fine = 0
         self.temp_comp = 0
+        # the heater range for gas calculation!
+        self._res_heat_range = (self._read_register(0x02, 1)[0] & 0b00110000) >> 4
+        # heater resistance correction factor
+        b = self._read_register(0x00, 1)
+        self._res_heat_val = self.unpack("b", b)[0]
+        # Read range switching error from register address 0x04 <7:4> (signed(!) 4 bit)
+        b = self._read_register(0x04, 1)
+        self.range_switching_error = (self.unpack("b", b)[0] & 0b11110000) / 16
 
     @staticmethod
     def get_array_item(id: int, index: int) -> int:
-        """Return item from array of const (pls see documentation).
+        """Возвращает целое из массива постоянных, который описан производителем датчика (Bosh).
+        Return item from array of const (pls see documentation).
         id = 0, from const_array1_int,
         id = 1, from const_array2_int.
         index must by in range 0..15 (range(16))"""
@@ -54,6 +63,7 @@ class BME680bosh(Device, Iterator):
         base_sensor.check_value(index, range(16), f"Invalid index value: {index}")
         ct = 2 ** 31 - 1, 4096000000
         t = (5, 7, 10, 11, 13), (4, 5, 7, 8)
+        # большее кол-во элементов массива можно легко вычислить, кроме нижеследующих
         arr = (2126008810, 2130303777, 2143188679, 2136746228, 2126008810), (255744255, 127110228, 32258064, 16016016)
 
         if index in t[id]:
@@ -142,6 +152,27 @@ class BME680bosh(Device, Iterator):
                 break
         return 4 ** i, v
 
+    def _get_temp_to_res_heat(self, temperature: [float, int], ambient_temperature: [float, int] = 21.0) -> int:
+        """Преобразует температуру (диапазон 200..400 °C), до которой нагреется пластина датчика в значение,
+        записываемое в регистр датчика.
+        Возвращает значение, которое нужно записать в регистр res_heat_x"""
+        target_temp, amb_temp = int(temperature), int(ambient_temperature)
+        base_sensor.check_value(target_temp, range(200, 401), f"Invalid temperature value: {target_temp} °C")
+        base_sensor.check_value(amb_temp, range(-40, 86),
+                                f"Invalid ambient temperature value: {amb_temp} °C")
+        # calc
+        getcd = self.get_calibration_data
+        par_g1, par_g2, par_g3 = getcd(19, 18, 20)
+        var1 = 7**2 + (par_g1 / 2**4)
+        var2 = 0.00235 + ((par_g2 / 2**15) * 0.0005)
+        var3 = par_g3 / 2**10
+        var4 = var1 * (1 + (var2 * target_temp))
+        var5 = var4 + (var3 * amb_temp)  # !
+        res_heat_x = (3.4 * ((var5 * (4 / (4 + self._res_heat_range)) * (1 / (1 + (self._res_heat_val * 0.002)))) - 25))
+        #
+        print(f"res_heat_x: {res_heat_x}")
+        return int(res_heat_x)
+
     @staticmethod
     def _check_gas_id(id: int) -> int:
         return base_sensor.check_value(id, range(10), f"Invalid id value: {id}")
@@ -199,6 +230,13 @@ class BME680bosh(Device, Iterator):
         self._write_register(addr, bf.put(val, osrs_value), 1)
         self.osrs[osrs_id] = osrs_value
 
+    def set_oversamplings(self, osrs_temp: int = 2, osrs_hum: int = 1, osrs_press: int = 1):
+        """Именно в такой последовательности нужно производить запись в регистры датчика.
+        Смотри '3.2.1 Быстрый старт' в документации!"""
+        self.set_oversampling(0, osrs_hum)  # relative humidity
+        self.set_oversampling(2, osrs_temp)  # temperature
+        self.set_oversampling(1, osrs_press)  # air pressure
+
     def get_oversampling(self, osrs_id: int) -> int:
         """Return oversampling value.
         osrs_id = 0     relative humidity
@@ -240,8 +278,8 @@ class BME680bosh(Device, Iterator):
         self._write_register(0xE0 if self._i2c_mode else 0x60, 0xB6, 1)
 
     # GAS
-    def heater_set_current(self, id: int, current: int):
-        """
+    def _heater_set_current(self, id: int, current: int):
+        """ Устанавливает ток нагревателя в [mA]
         Setup sensor gas heater with current
         :param current: 0..15 [mA]
         :param id: 0..9
@@ -252,41 +290,54 @@ class BME680bosh(Device, Iterator):
         raw_curr = (current << 3) - 1
         self._write_register(0x50 + id, raw_curr << 1, 1)   # bit 7..1 used, see documentation
 
-    def heater_set_resistance(self, id: int, value: int):
+    def _heater_set_resistance(self, id: int, ambient_temperature: [int, float],
+                               hot_plate_temperature: [int, float] = 300):
         """
         Setup sensor gas heater with resistance
         :param id: 0..9
-        :param value: Decimal value that needs to be stored for achieving target heater resistance
+        :param ambient_temperature: air ambient temperature
+        :param hot_plate_temperature: hot plate temperature set point
         :return: None
+
+        Используется метод _get_temp_to_res_heat
         """
         BME680bosh._check_gas_id(id)
-        base_sensor.check_value(value, range(0x100), f"Invalid current value: {value}")
-        self._write_register(0x5A + id, value, 1)
+        # base_sensor.check_value(value, range(0x100), f"Invalid current value: {value}")
+        res = self._get_temp_to_res_heat(hot_plate_temperature, ambient_temperature)
+        self._write_register(0x5A + id, res, 1)
 
-    def heater_set_wait_time(self, id: int, wait_time: int):
+    def _heater_set_wait_time(self, id: int, wait_time: int):
         """
         Setup sensor gas heater with wait_time
         :param id: 0..9
         :param wait_time: 0..4096 [ms]
         :return: wait time in [ms]
+
+        Продолжительность нагрева задается записью в соответствующий управляющий регистр gas_wait_x<7:0>.
+        Можно настроить продолжительность нагрева от 1 мс до 4032 мс. На практике нагревателю требуется около 20–30 мс
+        для достижения заданной заданной температуры.
+
+        The heating duration is specified by writing to the corresponding gas_wait_x<7:0> control register.
+        Heating durations between 1 ms and 4032 ms can be configured. In practice, approximately 20–30 ms are
+        necessary for the heater to reach the intended target temperature.
         """
         BME680bosh._check_gas_id(id)
         base_sensor.check_value(wait_time, range(4097), f"Invalid id value: {id}")
         t = BME680bosh._get_raw_wt(wait_time)
         self._write_register(0x64 + id, (t[0] << 6) | t[1], 1)
 
-    def heater_set_point(self, id: int, current: int, resistance: int, wait_time: int):
+    def heater_set_point(self, id: int, current: int, wait_time: int, hot_plate_temperature: [int, float] = 300):
         """
         Setup sensor gas heater with current, resistance, wait_time
         :param id: 0..9
         :param current: 0..15 [mA]
-        :param resistance: Decimal value that needs to be stored for achieving target heater resistance
+        :param hot_plate_temperature: hot plate target temperature for heat
         :param wait_time: 0..4096 [ms]
         :return:
         """
-        self.heater_set_current(id, current)
-        self.heater_set_resistance(id, resistance)
-        self.heater_set_wait_time(id, wait_time)
+        self._heater_set_current(id, current)
+        self._heater_set_resistance(id, self.temp_comp, int(hot_plate_temperature))
+        self._heater_set_wait_time(id, wait_time)
 
     def heater_enable_set_point(self, id: int, run_gas_conversion: bool):
         BME680bosh._check_gas_id(id)
@@ -300,7 +351,6 @@ class BME680bosh(Device, Iterator):
     def _get_3x_data(self, start_addr: int) -> int:
         # osrs_id = 1   atmosphere air pressure
         # osrs_id = 2   temperature
-
         # 16 + (osrs_t(p) – 1) bit resolution. xlsb
         osrs_id = -1
         if 0x1F == start_addr:  # pressure
@@ -333,7 +383,7 @@ class BME680bosh(Device, Iterator):
         """return raw humidity"""
         b = self._read_register(0x25, 2)
         return struct.unpack('>H', b)[0]
-        #return self.unpack("H", b)[0]
+        # return self.unpack("H", b)[0]
 
     def _get_gas_resistance_data(self) -> tuple:
         """Return (range_of_measured_gas_sensor_resistance, gas_sensor_resistance_data)"""
@@ -354,13 +404,15 @@ class BME680bosh(Device, Iterator):
 
     def get_temperature(self) -> float:
         """Возвращает температуру окружающей среды в градусах Цельсия.
-        Returns the ambient temperature in degrees Celsius."""
+        Вызов метода обязателен! Вызывать первым до вызова get_pressure, get_humidity!
+        Returns the ambient temperature in degrees Celsius.
+        The method call is required! Call first before calling get_pressure, get_humidity!"""
         raw = self._get_temp()
         # 17, 0 , 1: par_t1, par_t2, par_t3
         getcd = self.get_calibration_data
         tt = tuple(getcd(17, 0, 1))
         var1 = tt[1] * (raw / 2**14 - tt[0] / 2**10)
-        x = raw / 131072 - tt[0] / 8192
+        x = raw / 2**17 - tt[0] / 2**13
         var2 = 16 * tt[2] * x * x
         tmp = var1 + var2
         self.t_fine = tmp
@@ -368,7 +420,6 @@ class BME680bosh(Device, Iterator):
         # print(f"self.t_fine: {self.t_fine}")
         return self.temp_comp    
     
-
     def get_pressure(self) -> float:
         """Возвращает давление воздуха окружающей среды в паскалях.
         Returns the barometric pressure in Pascals."""
@@ -393,8 +444,7 @@ class BME680bosh(Device, Iterator):
         press_comp = press_comp + 0.0625 * (var1 + var2 + var3 + (par_p7 * 128))
         
         return press_comp
-        
-        
+
     def get_humidity(self) -> float:
         """Возвращает влажность окружающего воздуха в процентах.
         Returns the ambient humidity in percent."""
@@ -411,21 +461,17 @@ class BME680bosh(Device, Iterator):
         var3, var4 = par_h6 / 16384, par_h7 / 2097152
         return var2 + (var3 + var4 * tc) * var2 * var2
 
-    def get_gas(self, heater_temp: float = 300) -> float:
-        """Return """
-        gas_range, raw = self._get_gas_resistance_data()
-        # target temperature
-        tt = heater_temp
-        getcd = self.get_calibration_data
-        par_g1, par_g2, par_g3 = getcd(19, 18, 20)
-        var1 = 49 + par_g1 / 16.0
-        var2 = 0.00235 + par_g2 / 32768.0 * 0.0005
-        var3 = par_g3 / 1024.0
-        var4 = var1 * (1.0 + var2 * tt)
-        var5 = var4 + var3 * self.temp_comp
-        #
-        # res_heat_x = (3.4 * ((var5 * (4.0 / (4.0 + gas_range)) * (1.0 / (1.0 + (res_heat_val * 0.002)))) - 25))
-        return 0
+    def get_gas(self) -> float:
+        """Возвращает скомпенсированное сопротивление газового датчика в Омах.
+        Return compensated gas sensor resistance output data in Ohms
+        IAQ Range   0..500
+        Please see 'Table 4: Index for Air Quality (IAQ) classification and color-coding" in documentation'
+        """
+        gas_adc_range, adc_raw = self._get_gas_resistance_data()
+        var1 = (1340 + 5 * self.range_switching_error) * self.get_array_item(0, gas_adc_range)
+        # gas_res is the compensated gas sensor resistance output data in Ohms
+        gas_res = var1 * self.get_array_item(1, gas_adc_range) / (adc_raw + var1 - 2**9)
+        return gas_res
 
     def __iter__(self):
         return self
