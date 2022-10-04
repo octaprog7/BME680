@@ -21,26 +21,29 @@ if __name__ == '__main__':
     bme = bme680.BME680bosh(adaptor)
     chip_id = bme.get_id()
     print(f"chip_id: {hex(chip_id)}")
-    l = len(bme._calibration_data)
-    #print(f"calibration data array len: {l}")
-    #for i in range(l):
+    # l = len(bme._calibration_data)
+    # print(f"calibration data array len: {l}")
+    # for i in range(l):
     #    print(f"data[{i}] = {bme.get_calibration_data(i)}")
-
+    bgas = True
+    default_gas_id = 0
     # set oversampling for relative humidity, temperature, air pressure
-    bme.set_oversampling(0, 1)  # relative humidity
-    bme.set_oversampling(2, 2)  # temperature
-    bme.set_oversampling(1, 1)  # air pressure
-    #
-    bme.set_iir_filter(3)
+    # никогда не пропускайте измерения температуры!
+    bme.set_oversamplings(osrs_temp=2, osrs_hum=1, osrs_press=1)
+    bme.set_iir_filter(2)
     # set mode
     # bme.set_mode(True)
 
     while True:
         bme.set_mode(True)
+        if bgas:
+            bme.heater_set_point(id=default_gas_id, current=5, wait_time=500, hot_plate_temperature=300)
+            bme.heater_enable_set_point(id=default_gas_id, run_gas_conversion=True)
         time.sleep_ms(1500)
-        t = bme.get_temperature()
+        t = bme.get_temperature()   # вызов метода обязателен! Вызывать первым!
         h = bme.get_humidity()
         pas = bme.get_pressure()
         print(f"T={t} Celsius; H={h} %; P={pas} Pa; mm Hg={converter.pa_mmhg(pas)} ")
-
-
+        if bgas:
+            gas = bme.get_gas()
+            print(f"Index for Air Quality: {gas}")
