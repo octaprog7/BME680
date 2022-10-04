@@ -2,6 +2,7 @@ from machine import I2C, Pin
 import bme680
 import time
 from sensor_pack.bus_service import I2cAdapter
+from sensor_pack import converter
 
 
 if __name__ == '__main__':
@@ -39,5 +40,7 @@ if __name__ == '__main__':
         time.sleep_ms(1500)
         t = bme.get_temperature()
         h = bme.get_humidity()
-        p = bme.get_pressure()
-        print(f"T={t} Celsius; H={h} %; P={p} Pa")
+        pas = bme.get_pressure()
+        print(f"T={t} Celsius; H={h} %; P={pas} Pa; mm Hg={converter.pa_mmhg(pas)} ")
+
+

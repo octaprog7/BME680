@@ -89,31 +89,17 @@ class BME680bosh(Device, Iterator):
     #   20      par_g3
     #   21      par_h1
     #   22      par_h2
-    def get_calibration_data(self, value: [int, tuple, list]) -> int:
+    def get_calibration_data(self, *indices) -> int:
         """возвращает калибровочный коэффициент по его индексу.
-        Если вместо int передать tuple или list, содержащие набор правильных индексов,
-        функция вернет калибровочные коэффициенты для всех указанных индексов!
-        returns the calibration coefficient by its index.
-        If instead of int you pass a tuple or list containing the correct indices,
-        the function will return the calibration coefficients for all specified indices!"""
-        # print("isinstance(...):", value)
-        if isinstance(value, int):
-            base_sensor.check_value(value, range(0, 23), f"Invalid index value: {value}")
-            return self._calibration_data[value]
-        if isinstance(value, (tuple, list)):
-            for idx in value:
-                base_sensor.check_value(idx, range(0, 23), f"Invalid index value: {idx}")
-                yield self._calibration_data[idx]
+        returns the calibration coefficient by its index."""
+        for idx in indices:
+            base_sensor.check_value(idx, range(0, 23), f"Invalid index value: {idx}")
+            yield self._calibration_data[idx]
 
     def read_calibration_data(self) -> int:
+        """Read calibration data and store in array"""
         if self._calibration_data:
             raise ValueError(f"calibration data array already filled!")
-        """Read calibration data and store in array"""
-        # Типы значений:
-        # 0 - int8_t
-        # 1 - uint8_t
-        # 2 - int16_t
-        # 3 - uint16_t
         address = 0x8A
         tov = "hbHhbhhbbhhBbbbBbHhbb"              # len = 21, value format
         offset = 0, 2, 2, 2, 2, 2, 2, 2, 1, 3, 2, 2, 68, 1, 1, 1, 1, 1, 2, 2, 1  # len = 21
@@ -372,7 +358,7 @@ class BME680bosh(Device, Iterator):
         raw = self._get_temp()
         # 17, 0 , 1: par_t1, par_t2, par_t3
         getcd = self.get_calibration_data
-        tt = tuple(getcd((17, 0, 1)))
+        tt = tuple(getcd(17, 0, 1))
         var1 = tt[1] * (raw / 2**14 - tt[0] / 2**10)
         x = raw / 131072 - tt[0] / 8192
         var2 = 16 * tt[2] * x * x
@@ -389,8 +375,8 @@ class BME680bosh(Device, Iterator):
         raw = self._get_press()
         # print(f"raw pressure: {raw}")
         getcd = self.get_calibration_data
-        par_p1, par_p2, par_p3, par_p4 = getcd((2, 3, 4, 5))
-        par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd((6, 8, 7, 9, 10, 11))
+        par_p1, par_p2, par_p3, par_p4 = getcd(2, 3, 4, 5)
+        par_p5, par_p6, par_p7, par_p8, par_p9, par_p10 = getcd(6, 8, 7, 9, 10, 11)
 
         var1 = (0.5 * self.t_fine) - 64000
         var2 = var1 * var1 * par_p6 / 131072
@@ -415,9 +401,9 @@ class BME680bosh(Device, Iterator):
         raw = self._get_hum()
         # print(f"raw humidity: {raw}")
         getcd = self.get_calibration_data
-        par_h1, par_h2, par_h3, par_h4 = getcd((21, 22, 12, 13))
-        par_h5, par_h6, par_h7 = getcd((14, 15, 16))
-        #print(type(par_h1))
+        par_h1, par_h2, par_h3, par_h4 = getcd(21, 22, 12, 13)
+        par_h5, par_h6, par_h7 = getcd(14, 15, 16)
+        # print(type(par_h1))
         #
         tc = self.temp_comp
         var1 = raw - 16 * par_h1 + 0.5 * par_h3 * tc
@@ -431,7 +417,7 @@ class BME680bosh(Device, Iterator):
         # target temperature
         tt = heater_temp
         getcd = self.get_calibration_data
-        par_g1, par_g2, par_g3 = getcd((19, 18, 20))
+        par_g1, par_g2, par_g3 = getcd(19, 18, 20)
         var1 = 49 + par_g1 / 16.0
         var2 = 0.00235 + par_g2 / 32768.0 * 0.0005
         var3 = par_g3 / 1024.0
