@@ -50,7 +50,8 @@ class BME680bosh(Device, Iterator):
         self._res_heat_val = self.unpack("b", b)[0]
         # Read range switching error from register address 0x04 <7:4> (signed(!) 4 bit)
         b = self._read_register(0x04, 1)
-        self.range_switching_error = (self.unpack("b", b)[0] & 0b11110000) / 16
+        raw = self.unpack("b", b)[0]
+        self.range_switching_error = (raw & 0b11110000) // 16
 
     @staticmethod
     def get_array_item(id: int, index: int) -> int:
@@ -122,19 +123,16 @@ class BME680bosh(Device, Iterator):
             # check
             BME680bosh._check_calibration_value(rv, address)
             self._calibration_data.append(rv)
-            # print(f"address: {hex(address)}; {typ}; size: {size}; value: {rv}")
 
         # par_h1 read !
         b = self._read_register(0xE1, 3)    # read 0xE1, 0xE2, 0xE3
         rv = (b[2] << 4) | (b[1] & 0x0F)    # par_h1
         BME680bosh._check_calibration_value(rv, 0xE2)
         self._calibration_data.append(rv)
-        # print(f"address: 0xE3; H; size: 2; value: {rv}\tpar_h1")
         # par_h2 read !
         rv = (b[0] << 4) | ((b[1] & 0xF0) >> 4)  # par_h2
         BME680bosh._check_calibration_value(rv, 0xE3)
         self._calibration_data.append(rv)
-        # print(f"address: 0xE1; H; size: 2; value: {rv}\tpar_h2")
 
         return len(self._calibration_data)
 
@@ -170,7 +168,6 @@ class BME680bosh(Device, Iterator):
         var5 = var4 + (var3 * amb_temp)  # !
         res_heat_x = (3.4 * ((var5 * (4 / (4 + self._res_heat_range)) * (1 / (1 + (self._res_heat_val * 0.002)))) - 25))
         #
-        print(f"res_heat_x: {res_heat_x}")
         return int(res_heat_x)
 
     @staticmethod
@@ -287,6 +284,7 @@ class BME680bosh(Device, Iterator):
         """
         BME680bosh._check_gas_id(id)
         base_sensor.check_value(current, range(17), f"Invalid current value: {current}")
+        # transform from [mA] to raw code
         raw_curr = (current << 3) - 1
         self._write_register(0x50 + id, raw_curr << 1, 1)   # bit 7..1 used, see documentation
 
@@ -366,7 +364,8 @@ class BME680bosh(Device, Iterator):
         msb, lsb, xlsb = self._read_register(start_addr, 3)
         # if 0x1F == start_addr:  # pressure
         #    print(msb, lsb, (xlsb & 0xF0) >> 4)
-        return msb << (8 + curr_resol) | (lsb << curr_resol) | (xlsb & 0xF0) >> 4
+        resol_mask = 0x00, 0x10, 0x30, 0x70, 0xF0
+        return msb << (8 + curr_resol) | (lsb << curr_resol) | (xlsb & resol_mask[curr_resol]) >> 4
 
     def _get_press(self) -> int:
         """return raw pressure"""
@@ -382,8 +381,7 @@ class BME680bosh(Device, Iterator):
     def _get_hum(self) -> int:
         """return raw humidity"""
         b = self._read_register(0x25, 2)
-        return struct.unpack('>H', b)[0]
-        # return self.unpack("H", b)[0]
+        return self.unpack("H", b, ">")[0]
 
     def _get_gas_resistance_data(self) -> tuple:
         """Return (range_of_measured_gas_sensor_resistance, gas_sensor_resistance_data)"""
@@ -417,7 +415,6 @@ class BME680bosh(Device, Iterator):
         tmp = var1 + var2
         self.t_fine = tmp
         self.temp_comp = 0.0001953125 * tmp
-        # print(f"self.t_fine: {self.t_fine}")
         return self.temp_comp    
     
     def get_pressure(self) -> float:
@@ -449,11 +446,9 @@ class BME680bosh(Device, Iterator):
         """Возвращает влажность окружающего воздуха в процентах.
         Returns the ambient humidity in percent."""
         raw = self._get_hum()
-        # print(f"raw humidity: {raw}")
         getcd = self.get_calibration_data
         par_h1, par_h2, par_h3, par_h4 = getcd(21, 22, 12, 13)
         par_h5, par_h6, par_h7 = getcd(14, 15, 16)
-        # print(type(par_h1))
         #
         tc = self.temp_comp
         var1 = raw - 16 * par_h1 + 0.5 * par_h3 * tc
@@ -464,17 +459,31 @@ class BME680bosh(Device, Iterator):
     def get_gas(self) -> float:
         """Возвращает скомпенсированное сопротивление газового датчика в Омах.
         Return compensated gas sensor resistance output data in Ohms
-        IAQ Range   0..500
-        Please see 'Table 4: Index for Air Quality (IAQ) classification and color-coding" in documentation'
         """
         gas_adc_range, adc_raw = self._get_gas_resistance_data()
-        var1 = (1340 + 5 * self.range_switching_error) * self.get_array_item(0, gas_adc_range)
-        # gas_res is the compensated gas sensor resistance output data in Ohms
-        gas_res = var1 * self.get_array_item(1, gas_adc_range) / (adc_raw + var1 - 2**9)
+        var1 = (1340 + 5 * self.range_switching_error) * self.get_array_item(0, gas_adc_range) >> 16
+        var2 = (adc_raw << 15) - (1 << 24) + var1
+        gas_res = (((self.get_array_item(1, gas_adc_range) * var1) >> 9) + (var2 >>1)) / var2
         return gas_res
 
     def __iter__(self):
         return self
-
-    def __next__(self):
-        ...
+    
+    # osrs_id = 0     относительная влажность
+    # osrs_id = 1     давление
+    # osrs_id = 2     температура
+    def __next__(self) -> tuple:
+        """Iterator support"""
+        l = [float("inf") for i in range(4)]
+        t = self.get_temperature()
+        for idx in range(3):
+            if 0 == self.osrs[idx]:
+                continue	# skip
+            if 0 == idx:
+                l[0] = self.get_humidity()
+            if 1 == idx:
+                l[1] = self.get_pressure()
+            if 2 == idx:
+                l[2] = t
+                
+        return tuple(l)
