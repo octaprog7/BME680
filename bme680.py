@@ -43,6 +43,7 @@ class BME680bosh(Device, Iterator):
         # for internal calculation
         self.t_fine = 0
         self.temp_comp = 0
+        self._wait_time = 0
         # the heater range for gas calculation!
         self._res_heat_range = (self._read_register(0x02, 1)[0] & 0b00110000) >> 4
         # heater resistance correction factor
@@ -193,7 +194,11 @@ class BME680bosh(Device, Iterator):
         иначе датчик переходит в режим сна (Sleep mode).
         Sensor operation mode control.
         If forced_mode is True, then the sensor goes into Forced mode,
-        otherwise the sensor goes into sleep mode (Sleep mode)"""
+        otherwise the sensor goes into sleep mode (Sleep mode)
+        Под режим выделено два бита, это значит, что возможно до 4-х режимов,
+        но в даташите описано только два!
+        Two bits are allocated for the mode, which means that up to 4 modes are possible,
+        but only two are described in the datasheet!"""
         addr, lshift = 0x74, 0
         bf = bitfield.BitField(alias=None, start=lshift, stop=1 + lshift)
         val = self._read_register(addr, 1)[0]
@@ -322,6 +327,7 @@ class BME680bosh(Device, Iterator):
         BME680bosh._check_gas_id(id)
         base_sensor.check_value(wait_time, range(4097), f"Invalid id value: {id}")
         t = BME680bosh._get_raw_wt(wait_time)
+        self._wait_time = t[0] * t[1]    # wait time for heating [ms]
         self._write_register(0x64 + id, (t[0] << 6) | t[1], 1)
 
     def heater_set_point(self, id: int, current: int, wait_time: int, hot_plate_temperature: [int, float] = 300):
@@ -395,7 +401,9 @@ class BME680bosh(Device, Iterator):
         return bool(reg_val & 0x80), bool(reg_val & 0x40), bool(reg_val & 0x20), reg_val & 0x0F
 
     def get_gas_valid_status(self) -> tuple:
-        """Return tuple(gas_valid_r, heat_stab_r)"""
+        """Return tuple(gas_valid_r, heat_stab_r).
+        A real gas conversion (i.e., not a dummy one) is indicated by the gas_valid_r status register.
+        Heater temperature stability for target heater resistance is indicated heat_stab_x status bits."""
         reg_val = self._read_register(0x2B, 1)[0]
         # gas_valid_r, heat_stab_r
         return bool(reg_val & 0x20), bool(reg_val & 0x10)
@@ -466,6 +474,22 @@ class BME680bosh(Device, Iterator):
         gas_res = (((self.get_array_item(1, gas_adc_range) * var1) >> 9) + (var2 >>1)) / var2
         return gas_res
 
+    def get_measure_duration(self) -> int:
+        """Return sensor measure duration in microsecond [us]"""
+        oversample_to_meas_cycles = 0, 1, 2, 4, 8, 16
+
+        meas_cycles = oversample_to_meas_cycles[self.osrs[2]]   # temperature oversample
+        meas_cycles += oversample_to_meas_cycles[self.osrs[1]]  # pressure
+        meas_cycles += oversample_to_meas_cycles[self.osrs[0]]  # relative humidity
+
+        # TPH measurement duration
+        meas_dur = meas_cycles * 1963
+        meas_dur += 477 * 4     # TPH switching duration
+        meas_dur += 477 * 5     # Gas measurement duration
+        meas_dur += 1000
+
+        return meas_dur + 1000 * self._wait_time
+
     def __iter__(self):
         return self
     
@@ -474,16 +498,18 @@ class BME680bosh(Device, Iterator):
     # osrs_id = 2     температура
     def __next__(self) -> tuple:
         """Iterator support"""
-        l = [float("inf") for i in range(4)]
+        lst = [float("inf") for i in range(4)]
         t = self.get_temperature()
         for idx in range(3):
             if 0 == self.osrs[idx]:
-                continue	# skip
+                continue    # skip
             if 0 == idx:
-                l[0] = self.get_humidity()
+                lst[0] = self.get_humidity()
             if 1 == idx:
-                l[1] = self.get_pressure()
+                lst[1] = self.get_pressure()
             if 2 == idx:
-                l[2] = t
-                
-        return tuple(l)
+                lst[2] = t
+        gas_valid, heat_stab = self.get_gas_valid_status()
+        if gas_valid and heat_stab:
+            lst[3] = self.get_gas()
+        return tuple(lst)
