@@ -1,4 +1,4 @@
-from machine import I2C, Pin
+from machine import I2C
 import bme680
 import time
 from sensor_pack.bus_service import I2cAdapter
@@ -32,7 +32,7 @@ if __name__ == '__main__':
         bme.heater_enable_set_point(id=default_gas_id, run_gas_conversion=True)
     
     print("Without using an iterator")
-    for _ in range(10):
+    for _ in range(5):
         if bgas:
             bme.heater_enable_set_point(id=default_gas_id, run_gas_conversion=True)
         # set mode
@@ -48,8 +48,11 @@ if __name__ == '__main__':
                 gas = bme.get_gas()
                 print(f"get_gas: {gas}")
 
+    print(16*" ")
     print("Using an iterator")
     for hum, press, temp, gas in bme:
         bme.set_mode(True)
         time.sleep_ms(1500)
+        duration = bme.get_measure_duration()
+        print(f"Sensor measure duration: {duration} [us]")
         print(f"T={temp} Celsius; H={hum} %; mm Hg={converter.pa_mmhg(press)}; Gas={gas}")
