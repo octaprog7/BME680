@@ -20,6 +20,7 @@ Then open main.py in your IDE and run it.
 ![alt text](https://github.com/octaprog7/BME680/blob/master/bme680board.jpg)
 
 # Index Air Quality (IAQ)
+##RU:
 Модуль IAQ_tracker.py основан на коде raspi-bme680-iaq. https://github.com/thstielow/raspi-bme680-iaq. 
 Для получения правильных значений IAQ, необходима длительная и сложная калибровка. 
 Читайте readme по ссылке: https://github.com/thstielow/raspi-bme680-iaq.
@@ -31,6 +32,7 @@ Then open main.py in your IDE and run it.
 ПС. возможно, кто-нибудь сможет написать код на питоне для MCU, вычисляющий индекса качества воздуха. 
 И описать его калибровку. 
 
+##EN:
 The IAQ_tracker.py module is based on the raspi-bme680-iaq code. https://github.com/thstielow/raspi-bme680-iaq. 
 In order to obtain the correct values of IAQ, a lengthy and complicated calibration is necessary. 
 Read the readme at: https://github.com/thstielow/raspi-bme680-iaq.
