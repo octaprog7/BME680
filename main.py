@@ -3,6 +3,7 @@ import bme680
 import time
 from sensor_pack.bus_service import I2cAdapter
 from sensor_pack import converter
+from IAQ.IAQ_tracker import IAQTracker
 
 
 if __name__ == '__main__':
@@ -48,11 +49,14 @@ if __name__ == '__main__':
                 gas = bme.get_gas()
                 print(f"get_gas: {gas}")
 
+    tracker = IAQTracker(100, 1800)
     print(16*" ")
     print("Using an iterator")
     for hum, press, temp, gas in bme:
         bme.set_mode(True)
         time.sleep_ms(1500)
         duration = bme.get_measure_duration()
-        print(f"Sensor measure duration: {duration} [us]")
+        # print(f"Sensor measure duration: {duration} [us]")
         print(f"T={temp} Celsius; H={hum} %; mm Hg={converter.pa_mmhg(press)}; Gas={gas}")
+        iaq = tracker.get_index_air_quality(temp, hum, press, gas)
+        print(f"IAQ %: {iaq}")
