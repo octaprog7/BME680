@@ -474,7 +474,7 @@ class BME680bosh(Device, Iterator):
         gas_res = (((self.get_array_item(1, gas_adc_range) * var1) >> 9) + (var2 >>1)) / var2
         return gas_res
 
-    def get_measure_duration(self) -> int:
+    def get_measure_duration(self, include_wait_time: bool = False) -> int:
         """Return sensor measure duration in microsecond [us]"""
         oversample_to_meas_cycles = 0, 1, 2, 4, 8, 16
 
@@ -487,8 +487,10 @@ class BME680bosh(Device, Iterator):
         meas_dur += 477 * 4     # TPH switching duration
         meas_dur += 477 * 5     # Gas measurement duration
         meas_dur += 1000
-
-        return meas_dur + 1000 * self._wait_time
+        #
+        if include_wait_time:
+            return meas_dur + 1000 * self._wait_time
+        return meas_dur
 
     def __iter__(self):
         return self
