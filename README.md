@@ -36,7 +36,7 @@ In order to obtain the correct values of IAQ, a lengthy and complicated calibrat
 Read the readme at: https://github.com/thstielow/raspi-bme680-iaq.
 
 Since Bosch does not disclose their algorithm for calculating the air quality index 
-for the MCU, in my opinion, you should not include a "gas node" in the sensor! 
+for the MCU, in my opinion, you should do not turn on the "gas node" in the sensor! 
 Enjoy only the temperature, pressure and humidity of the air.
 
 PS. perhaps someone can write a python code that calculates the air quality index. 
