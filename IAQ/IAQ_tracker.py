@@ -28,6 +28,8 @@ class IAQTracker:
 
     def get_index_air_quality(self, temperature: float, relative_humidity: float,
                               pressure: float, gas_resistance: float) -> [float, None]:
+        """Return Index Air Quality.
+        If it returns None, you need to wait a while!"""
         # calculate saturation density and absolute humidity
         rho_max = IAQ_utils.get_water_sat_density(temperature)
         hum_abs = IAQ_utils.get_absolute_humidity(relative_humidity, rho_max)
