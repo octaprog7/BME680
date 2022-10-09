@@ -1,2 +1,2 @@
-NAME = "base sensor micropython package"
+NAME = "Index Air Quality"
 VERSION = "1.0"
